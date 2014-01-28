@@ -66,17 +66,17 @@ void sendall(int sock, const char * buf, int len) {
     }
 }
 
-int main() {
+void usage(FILE *to) {
+    fprintf(to, "usage: tgen HOST PORT\n");
+}
+
+int main(int argc, char * argv[]) {
     struct addrinfo *res;
-    if (getaddrinfo(HOST, PORT, NULL, &res) != 0) {
+
+    if (argc < 3) { usage(stderr); exit(1); }
+
+    if (getaddrinfo(argv[1], argv[2], NULL, &res) != 0) {
         perror("getaddrinfo"); exit(1);
-    }
-
-    int sock = socket(PF_INET, SOCK_DGRAM, PR_UDP);
-    if (sock == -1) { perror("socket"); exit(1); }
-
-    if (connect(sock, res->ai_addr, res->ai_addrlen) == -1) {
-        perror("connect"); exit(1);
     }
 
     {
@@ -86,9 +86,17 @@ int main() {
             printf("Serving on %s:%s\n", host, service);
         }
     }
+
+    int sock = socket(PF_INET, SOCK_DGRAM, PR_UDP);
+    if (sock == -1) { perror("socket"); exit(1); }
+
+    if (connect(sock, res->ai_addr, res->ai_addrlen) == -1) {
+        perror("connect"); exit(1);
+    }
+
     freeaddrinfo(res);
 
-    long per_s = (1024 * 1024) * 10;
+    long per_s = (1024 * 300);
     //long per_s = (1024 * 100);
     
     long packet_len;
