@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netdb.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <errno.h>
@@ -23,12 +23,12 @@ void * xmalloc(size_t size) {
     return out;
 }
 
-useconds_t ms_to_us(long millis) { 
+suseconds_t ms_to_us(long millis) { 
     return millis * 1000; 
 }
 
-useconds_t sleep_for(long rate, char **packet, long *packet_len) { 
-    useconds_t sleep = 0;
+struct timeval sleep_for(long rate, char **packet, long *packet_len) { 
+    suseconds_t sleep = 0;
     long packet_size = 1;
     long real_s = rate + (rate / 2);
 
@@ -40,7 +40,12 @@ useconds_t sleep_for(long rate, char **packet, long *packet_len) {
     *packet_len = packet_size;
     *packet = xmalloc(packet_size);
     memset(*packet, 0, packet_size);
-    return sleep;
+
+    struct timeval out = {
+        .tv_sec = 0,
+        .tv_usec = sleep,
+    };
+    return out;
 }
 
 void print_rate(long bytes) {
@@ -88,14 +93,16 @@ int main() {
     
     long packet_len;
     char *packet;
-    useconds_t sleep = sleep_for(per_s, &packet, &packet_len);
+    struct timeval sleep, _sleep;
+    sleep = sleep_for(per_s, &packet, &packet_len);
 
     printf("Serving traffic at: ");
     print_rate(per_s);
     printf("\n");
     while (true) {
         sendall(sock, packet, packet_len);
-        usleep(sleep);
+        _sleep = sleep;
+        select(0, NULL, NULL, NULL, &_sleep);
     }
 
     return 0;
