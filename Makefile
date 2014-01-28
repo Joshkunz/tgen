@@ -1,6 +1,6 @@
 .PHONY: clean
 
-CFLAGS = -Wall -Wextra -pedantic -Werror
+CFLAGS = -Wall -Wextra -Werror
 
 tgen:
 
