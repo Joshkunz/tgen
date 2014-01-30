@@ -8,8 +8,13 @@
 #include <errno.h>
 #include <string.h>
 
-#define HOST "10.0.0.3"
-#define PORT "5001"
+#define UDP_SIZE 16
+/* due to options fields in the IP header, it's
+ * size varies, there will always be at least 80 bytes
+ * in the header though. */
+#define IP_SIZE 80
+#define ETH_SIZE 28
+#define ETH_DATAMIN 42
 
 #define PR_UDP 17
 const char *endings[] = { "b", "kb", "mb", "gb", "tb" };
@@ -67,15 +72,18 @@ void sendall(int sock, const char * buf, int len) {
 }
 
 void usage(FILE *to) {
-    fprintf(to, "usage: tgen HOST PORT\n");
+    fprintf(to, "usage: tgen HOST PORT BYTES/SEC\n");
 }
 
 int main(int argc, char * argv[]) {
+    int aoffset = 0;
     struct addrinfo *res;
 
-    if (argc < 3) { usage(stderr); exit(1); }
+    if (argc < 4) { usage(stderr); exit(1); }
 
-    if (getaddrinfo(argv[1], argv[2], NULL, &res) != 0) {
+    long per_s = atol(argv[aoffset + 3]);
+
+    if (getaddrinfo(argv[aoffset + 1], argv[aoffset + 2], NULL, &res) != 0) {
         perror("getaddrinfo"); exit(1);
     }
 
@@ -95,9 +103,6 @@ int main(int argc, char * argv[]) {
     }
 
     freeaddrinfo(res);
-
-    long per_s = (1024 * 300);
-    //long per_s = (1024 * 100);
     
     long packet_len;
     char *packet;
