@@ -28,8 +28,18 @@ void * xmalloc(size_t size) {
     return out;
 }
 
-suseconds_t ms_to_us(long millis) { 
+/* seconds to milliseconds */
+long stoms(long seconds) {
+    return seconds * 1000;
+}
+
+/* milliseconds to microseconds */
+suseconds_t mstous(long millis) { 
     return millis * 1000; 
+}
+
+long ustoms(suseconds_t micros) {
+    return micros / 1000;
 }
 
 struct timeval sleep_for(long rate, char **packet, long *packet_len) { 
@@ -37,10 +47,10 @@ struct timeval sleep_for(long rate, char **packet, long *packet_len) {
     long packet_size = 1;
     long real_s = rate + (rate / 2);
 
-    sleep = ms_to_us(1000) / (real_s / packet_size);
+    sleep = mstous(1000) / (real_s / packet_size);
     while (sleep < 100) {
         packet_size *= 2;
-        sleep = ms_to_us(1000) / (real_s / packet_size);
+        sleep = mstous(1000) / (real_s / packet_size);
     }
     *packet_len = packet_size;
     *packet = xmalloc(packet_size);
@@ -71,8 +81,32 @@ void sendall(int sock, const char * buf, int len) {
     }
 }
 
+struct timeval ramp_up(int sock, long from_rate, long to_rate, long over_s, 
+                       char **packet, long *packet_len) {
+    long rate_per_ms = (to_rate - from_rate) / stoms(over_s);
+    suseconds_t last_jump = 0;
+    long current_rate = from_rate;
+
+    struct timeval sleep, _sleep;
+
+    sleep = sleep_for(current_rate, packet, packet_len);
+    while (current_rate < to_rate) {
+        sendall(sock, *packet, *packet_len);
+        _sleep = sleep;
+        select(0, NULL, NULL, NULL, &_sleep);
+        last_jump += sleep.tv_usec;
+        if (last_jump >= mstous(1)) {
+            free(*packet);
+            current_rate += rate_per_ms;
+            sleep = sleep_for(current_rate, packet, packet_len);
+            last_jump = 0;
+        }
+    }
+    return sleep;
+}
+
 void usage(FILE *to) {
-    fprintf(to, "usage: tgen HOST PORT BYTES/SEC\n");
+    fprintf(to, "usage: tgen HOST PORT BYTES/SEC OVER FROM\n");
 }
 
 int main(int argc, char * argv[]) {
@@ -82,6 +116,8 @@ int main(int argc, char * argv[]) {
     if (argc < 4) { usage(stderr); exit(1); }
 
     long per_s = atol(argv[aoffset + 3]);
+    long over = atol(argv[aoffset + 4]);
+    long from = atol(argv[aoffset + 5]);
 
     if (getaddrinfo(argv[aoffset + 1], argv[aoffset + 2], NULL, &res) != 0) {
         perror("getaddrinfo"); exit(1);
@@ -103,11 +139,15 @@ int main(int argc, char * argv[]) {
     }
 
     freeaddrinfo(res);
-    
-    long packet_len;
+
     char *packet;
+    long packet_len;
     struct timeval sleep, _sleep;
-    sleep = sleep_for(per_s, &packet, &packet_len);
+    printf("Ramping up from "); print_rate(from); 
+    printf(" to "); print_rate(per_s); printf(" over %ld seconds.\n", over);
+    sleep = ramp_up(sock, from, per_s, over, &packet, &packet_len);
+
+    printf("Finished ramp.\n");
 
     printf("Serving traffic at: ");
     print_rate(per_s);
