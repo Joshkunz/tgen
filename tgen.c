@@ -113,11 +113,16 @@ int main(int argc, char * argv[]) {
     int aoffset = 0;
     struct addrinfo *res;
 
-    if (argc < 4) { usage(stderr); exit(1); }
+    long per_s, over, from;
 
-    long per_s = atol(argv[aoffset + 3]);
-    long over = atol(argv[aoffset + 4]);
-    long from = atol(argv[aoffset + 5]);
+    if (argc < 4) { usage(stderr); exit(1); }
+    per_s = atol(argv[aoffset + 3]);
+    if (argc == 6) {
+        over = atol(argv[aoffset + 4]);
+        from = atol(argv[aoffset + 5]);
+    } else {
+        over = from = 0;
+    }
 
     if (getaddrinfo(argv[aoffset + 1], argv[aoffset + 2], NULL, &res) != 0) {
         perror("getaddrinfo"); exit(1);
@@ -143,11 +148,14 @@ int main(int argc, char * argv[]) {
     char *packet;
     long packet_len;
     struct timeval sleep, _sleep;
-    printf("Ramping up from "); print_rate(from); 
-    printf(" to "); print_rate(per_s); printf(" over %ld seconds.\n", over);
-    sleep = ramp_up(sock, from, per_s, over, &packet, &packet_len);
-
-    printf("Finished ramp.\n");
+    if (over != 0) {
+        printf("Ramping up from "); print_rate(from); 
+        printf(" to "); print_rate(per_s); printf(" over %ld seconds.\n", over);
+        sleep = ramp_up(sock, from, per_s, over, &packet, &packet_len);
+        printf("Finished ramp.\n");
+    } else {
+        sleep = sleep_for(per_s, &packet, &packet_len);
+    }
 
     printf("Serving traffic at: ");
     print_rate(per_s);
