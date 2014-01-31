@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <string.h>
+#include <math.h>
+#include <unistd.h>
 
 #define UDP_SIZE 16
 /* due to options fields in the IP header, it's
@@ -18,6 +20,9 @@
 
 #define PR_UDP 17
 const char *endings[] = { "b", "kb", "mb", "gb", "tb" };
+
+#define RAMP_LINEAR 0
+#define RAMP_EXPONENTIAL 1
 
 void * xmalloc(size_t size) {
     void * out = malloc(size);
@@ -82,7 +87,7 @@ void sendall(int sock, const char * buf, int len) {
 }
 
 struct timeval ramp_up(int sock, long from_rate, long to_rate, long over_s, 
-                       char **packet, long *packet_len) {
+                       char **packet, long *packet_len, int type, float factor) {
     long rate_per_ms = (to_rate - from_rate) / stoms(over_s);
     suseconds_t last_jump = 0;
     long current_rate = from_rate;
@@ -97,7 +102,11 @@ struct timeval ramp_up(int sock, long from_rate, long to_rate, long over_s,
         last_jump += sleep.tv_usec;
         if (last_jump >= mstous(1)) {
             free(*packet);
-            current_rate += rate_per_ms;
+            if (type == RAMP_LINEAR) {
+                current_rate += rate_per_ms;
+            } else {
+                 current_rate += lround(current_rate * factor);
+            }
             sleep = sleep_for(current_rate, packet, packet_len);
             last_jump = 0;
         }
@@ -106,25 +115,48 @@ struct timeval ramp_up(int sock, long from_rate, long to_rate, long over_s,
 }
 
 void usage(FILE *to) {
-    fprintf(to, "usage: tgen HOST PORT BYTES/SEC OVER FROM\n");
+    fprintf(to, "usage: tgen [-o <over>] [-b <base>] [-r]\n"
+                "               [-e <factor>] BYTES/sec HOST PORT\n"
+                "Required:\n"
+                "   HOST       The IP address of the host to connect to.\n"
+                "   PORT       The port to connect on.\n"
+                "   BYTES/sec  The bitrate to generate.\n"
+                "Options:\n"
+                "   -o  scale the traffic from 'base' to bytes/sec over <over>\n"
+                "       seconds.\n"
+                "   -b  Scale from this many bytes/sec to bytes/sec see -o\n"
+                "   -e  Scale an an exponential factor <factor> rather than\n"
+                "       scaleling linearly.\n"
+                "   -r  Try to include lower-level frame details in the bytes/sec\n"
+                "       metric.\n");
 }
 
 int main(int argc, char * argv[]) {
-    int aoffset = 0;
     struct addrinfo *res;
 
-    long per_s, over, from;
-
-    if (argc < 4) { usage(stderr); exit(1); }
-    per_s = atol(argv[aoffset + 3]);
-    if (argc == 6) {
-        over = atol(argv[aoffset + 4]);
-        from = atol(argv[aoffset + 5]);
-    } else {
-        over = from = 0;
+    long rate, over = 0, from = 0;
+    int scale_type = RAMP_LINEAR;
+    float factor = 0.0;
+    bool realistic = false, exit_loop = false;
+    char arg, *host, *port;
+    
+    while (((arg = getopt(argc, argv, "o:b:e:rh")) != -1) && !exit_loop) {
+        switch (arg) {
+            case 'o': over = atol(optarg); break;
+            case 'b': from = atol(optarg); break;
+            case 'r': realistic = true; break;
+            case 'e': scale_type = RAMP_EXPONENTIAL; 
+                      factor = atof(optarg); break;
+            case 'h': usage(stderr); exit(0);
+            default: printf("Exiting Loop.\n"); exit_loop = true;
+        }
     }
 
-    if (getaddrinfo(argv[aoffset + 1], argv[aoffset + 2], NULL, &res) != 0) {
+    rate = atol(argv[optind]);
+    host = argv[optind + 1];
+    port = argv[optind + 2];
+
+    if (getaddrinfo(host, port, NULL, &res) != 0) {
         perror("getaddrinfo"); exit(1);
     }
 
@@ -150,15 +182,16 @@ int main(int argc, char * argv[]) {
     struct timeval sleep, _sleep;
     if (over != 0) {
         printf("Ramping up from "); print_rate(from); 
-        printf(" to "); print_rate(per_s); printf(" over %ld seconds.\n", over);
-        sleep = ramp_up(sock, from, per_s, over, &packet, &packet_len);
+        printf(" to "); print_rate(rate); printf(" over %ld seconds.\n", over);
+        sleep = ramp_up(sock, from, rate, over, &packet, &packet_len, 
+                        scale_type, factor);
         printf("Finished ramp.\n");
     } else {
-        sleep = sleep_for(per_s, &packet, &packet_len);
+        sleep = sleep_for(rate, &packet, &packet_len);
     }
 
     printf("Serving traffic at: ");
-    print_rate(per_s);
+    print_rate(rate);
     printf("\n");
     while (true) {
         sendall(sock, packet, packet_len);

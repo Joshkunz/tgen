@@ -1,6 +1,7 @@
 .PHONY: clean tar
 
 CFLAGS = -Wall -Wextra -Werror
+LIBS = -lm
 tarname = tgen.tar.gz
 
 tgen:
